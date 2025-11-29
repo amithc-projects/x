@@ -22,6 +22,14 @@ export interface TransformationContext {
     filename: string;
     metadata?: Record<string, any>;
     variables: Map<string, ImageData>;
+    outputSubfolder?: string;
+}
+
+export interface ProcessResult {
+    blob: Blob;
+    filename: string;
+    aggregationId?: string; // If present, this is an aggregation capture, not a final file
+    subfolder?: string;
 }
 
 export interface TransformationDefinition {
@@ -41,7 +49,7 @@ export interface RecipeStep {
     transformationId: string;
     params: Record<string, any>;
     condition?: Condition;
-    disabled?: boolean; // New property
+    disabled?: boolean;
 }
 
 export interface Recipe {

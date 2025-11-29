@@ -15,6 +15,7 @@ import { smartRedaction } from './ai/smart_redaction';
 import { backgroundRemoval } from './ai/background_removal';
 import { stripMetadata } from './metadata/gps';
 import { textFill, textCutout } from './creative/typography';
+import { outputFolder, outputVideo, outputGif, outputContactSheet } from './output';
 
 export function registerAllTransformations() {
     transformationRegistry.register(grayscale);
@@ -52,4 +53,10 @@ export function registerAllTransformations() {
     // Typography
     transformationRegistry.register(textFill);
     transformationRegistry.register(textCutout);
+
+    // Output & Aggregation
+    transformationRegistry.register(outputFolder);
+    transformationRegistry.register(outputVideo);
+    transformationRegistry.register(outputGif);
+    transformationRegistry.register(outputContactSheet);
 }

@@ -1,4 +1,4 @@
-import { Recipe, TransformationContext, Condition } from './types';
+import { Recipe, TransformationContext, Condition, ProcessResult } from './types';
 import { transformationRegistry } from './Registry';
 
 export class ImageProcessor {
@@ -44,7 +44,7 @@ export class ImageProcessor {
         recipe: Recipe,
         context: TransformationContext,
         stopAfterStepIndex?: number
-    ): Promise<{ blob: Blob; filename: string }[]> {
+    ): Promise<ProcessResult[]> {
         // Reset canvas to image size
         this.canvas.width = image.naturalWidth;
         this.canvas.height = image.naturalHeight;
@@ -57,7 +57,7 @@ export class ImageProcessor {
             context.variables = new Map();
         }
 
-        const results: { blob: Blob; filename: string }[] = [];
+        const results: ProcessResult[] = [];
 
         // Apply steps
         for (let i = 0; i < recipe.steps.length; i++) {
@@ -82,22 +82,61 @@ export class ImageProcessor {
             if (step.transformationId === 'workflow-export') {
                 const suffix = step.params.suffix || '';
                 const format = step.params.format || 'image/jpeg';
+                const quality = step.params.quality !== undefined ? step.params.quality / 100 : 0.95;
 
-                const blob = await new Promise<Blob | null>((resolve) => {
-                    this.canvas.toBlob((b) => resolve(b), format, 0.95);
-                });
+                let blob: Blob | null = null;
+
+                if (format === 'image/tiff') {
+                    try {
+                        const UTIF = (await import('utif')).default;
+                        const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+                        const tiffData = UTIF.encodeImage(new Uint8Array(imageData.data.buffer), imageData.width, imageData.height);
+                        blob = new Blob([tiffData], { type: 'image/tiff' });
+                    } catch (e) {
+                        console.warn('TIFF export failed, falling back to JPEG', e);
+                        blob = await new Promise<Blob | null>((resolve) => {
+                            this.canvas.toBlob((b) => resolve(b), 'image/jpeg', quality);
+                        });
+                    }
+                } else {
+                    blob = await new Promise<Blob | null>((resolve) => {
+                        this.canvas.toBlob((b) => resolve(b), format, quality);
+                    });
+                }
 
                 if (blob) {
                     const nameParts = context.filename.split('.');
                     const ext = nameParts.pop();
                     const base = nameParts.join('.');
-                    const newExt = format.split('/')[1];
+                    // Determine extension
+                    let newExt = 'jpg';
+                    if (format === 'image/webp') newExt = 'webp';
+                    else if (format === 'image/avif') newExt = 'avif';
+                    else if (format === 'image/png') newExt = 'png';
+                    else if (format === 'image/tiff') newExt = 'tiff';
+
                     results.push({
                         blob,
-                        filename: `${base}${suffix}.${newExt}`
+                        filename: `${base}${suffix}.${newExt}`,
+                        subfolder: context.outputSubfolder
                     });
                 }
-                // Don't continue here, we might want to do more steps after export
+            } else if (['output-video', 'output-gif', 'output-contact-sheet'].includes(step.transformationId)) {
+                // Aggregation Step: Capture current state
+                // We capture as JPEG for speed/size, or maybe PNG for quality?
+                // Let's use JPEG 0.9 for now
+                const blob = await new Promise<Blob | null>((resolve) => {
+                    this.canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.9);
+                });
+
+                if (blob) {
+                    results.push({
+                        blob,
+                        filename: `capture_${step.id}.jpg`, // Temporary name
+                        aggregationId: step.id,
+                        subfolder: context.outputSubfolder // Store where this capture "belongs" if needed
+                    });
+                }
             } else {
                 const transformation = transformationRegistry.get(step.transformationId);
                 if (transformation) {
@@ -113,28 +152,18 @@ export class ImageProcessor {
             }
         }
 
-        // If we stopped early, we probably just want the current state
-        if (stopAfterStepIndex !== undefined) {
-            // For partial preview, we don't return exports usually, just the canvas state is used by processToDataUrl
-            // But if process() is called directly, maybe we return what we have?
-            // Let's stick to the logic: process() returns files.
-            // If stopped early, maybe no files are generated yet?
-            // If the user wants to see the preview, they use processToDataUrl.
-        }
-
-        const hasExports = recipe.steps.some(s => s.transformationId === 'workflow-export');
+        // ... (rest of the function logic for preview if needed, but we return results)
 
         // If no exports defined, or if we stopped early (and thus might have skipped exports),
         // we might want to return the current state.
-        // But for batch processing, we usually run the whole recipe.
-        // For preview, we use processToDataUrl.
+        const hasExports = recipe.steps.some(s => s.transformationId === 'workflow-export' || ['output-video', 'output-gif', 'output-contact-sheet'].includes(s.transformationId));
 
         if (!hasExports && stopAfterStepIndex === undefined) {
             const blob = await new Promise<Blob | null>((resolve) => {
                 this.canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.95);
             });
             if (blob) {
-                results.push({ blob, filename: context.filename });
+                results.push({ blob, filename: context.filename, subfolder: context.outputSubfolder });
             }
         }
 

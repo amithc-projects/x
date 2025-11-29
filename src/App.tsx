@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { loadImage } from './core/InputLoaders';
 import { Layout } from './components/Layout';
 import { LibrarySidebar } from './components/LibrarySidebar';
 import { RecipeEditor } from './components/RecipeEditor';
@@ -104,24 +105,32 @@ function App() {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const img = new Image();
-      img.onload = () => setOriginalImage(img);
-      img.src = URL.createObjectURL(file);
+      try {
+        const img = await loadImage(file);
+        setOriginalImage(img);
+      } catch (e) {
+        console.error("Failed to load image", e);
+        alert("Failed to load image. It might be an unsupported format.");
+      }
     }
   };
 
-  const handleFolderUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    // Update filter to include heic
+    const imageFiles = files.filter(f => f.type.startsWith('image/') || f.name.toLowerCase().endsWith('.heic'));
     setBatchFiles(imageFiles);
 
     if (imageFiles.length > 0 && !originalImage) {
-      const img = new Image();
-      img.onload = () => setOriginalImage(img);
-      img.src = URL.createObjectURL(imageFiles[0]);
+      try {
+        const img = await loadImage(imageFiles[0]);
+        setOriginalImage(img);
+      } catch (e) {
+        console.error("Failed to load first image", e);
+      }
     }
   };
 
