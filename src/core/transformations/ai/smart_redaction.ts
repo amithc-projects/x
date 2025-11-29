@@ -42,7 +42,7 @@ export const smartRedaction: TransformationDefinition = {
         // Clip and draw blurred text regions
         ctx.save();
         ctx.beginPath();
-        words.forEach(word => {
+        words.forEach((word: any) => {
             const box = word.bbox;
             // Pad the box slightly
             const padding = 2;

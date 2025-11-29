@@ -1,15 +1,34 @@
 import { TransformationDefinition } from '../../types';
-import * as faceapi from 'face-api.js';
+import { FaceDetector, FilesetResolver, Detection } from '@mediapipe/tasks-vision';
 
-let modelsLoaded = false;
+let faceDetector: FaceDetector | null = null;
+let loadingPromise: Promise<void> | null = null;
 
 const loadModels = async () => {
-    if (modelsLoaded) return;
-    // Assuming models are served from /models in public directory
-    await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
-    // await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-    // await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
-    modelsLoaded = true;
+    if (faceDetector) return;
+    if (loadingPromise) return loadingPromise;
+
+    loadingPromise = (async () => {
+        const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        );
+        faceDetector = await FaceDetector.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite`,
+                delegate: "GPU"
+            },
+            runningMode: "IMAGE"
+        });
+    })();
+
+    await loadingPromise;
+};
+
+// Export the detector loader for other files to use
+export const getFaceDetector = async (): Promise<FaceDetector> => {
+    await loadModels();
+    if (!faceDetector) throw new Error("Failed to load face detector");
+    return faceDetector;
 };
 
 export const facePrivacy: TransformationDefinition = {
@@ -21,18 +40,17 @@ export const facePrivacy: TransformationDefinition = {
         { name: 'confidence', label: 'Confidence Threshold', type: 'range', min: 0.1, max: 1.0, step: 0.1, defaultValue: 0.5 }
     ],
     apply: async (ctx, params) => {
-        await loadModels();
+        const detector = await getFaceDetector();
 
         const blurAmount = params.blurAmount || 10;
         const confidence = params.confidence || 0.5;
 
-        // face-api.js works with HTMLImageElement, HTMLVideoElement, or HTMLCanvasElement
-        const detections = await faceapi.detectAllFaces(
-            ctx.canvas,
-            new faceapi.SsdMobilenetv1Options({ minConfidence: confidence })
-        );
+        // MediaPipe works with HTMLImageElement, HTMLVideoElement, or HTMLCanvasElement
+        // We need to ensure the canvas is valid for detection
+        const detectionsResult = detector.detect(ctx.canvas);
+        const detections = detectionsResult.detections;
 
-        if (detections.length === 0) return;
+        if (!detections || detections.length === 0) return;
 
         const width = ctx.canvas.width;
         const height = ctx.canvas.height;
@@ -51,12 +69,26 @@ export const facePrivacy: TransformationDefinition = {
         // For each face, clip the blurred image to the face box and draw over original
         ctx.save();
         ctx.beginPath();
+
         detections.forEach(detection => {
-            const box = detection.box;
-            // Ellipse for face? or Rect? Rect is safer for full coverage.
-            // Let's do a rounded rect or ellipse.
-            ctx.rect(box.x, box.y, box.width, box.height);
+            // Check confidence if available (MediaPipe returns categories with scores)
+            const score = detection.categories[0]?.score ?? 1.0;
+            if (score < confidence) return;
+
+            const box = detection.boundingBox;
+            if (!box) return;
+
+            // MediaPipe bounding box: originX, originY, width, height
+            // We can use an ellipse for a more natural face blur
+            const centerX = box.originX + box.width / 2;
+            const centerY = box.originY + box.height / 2;
+            const radiusX = box.width / 2;
+            const radiusY = box.height / 2;
+
+            ctx.moveTo(centerX + radiusX, centerY);
+            ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, 2 * Math.PI);
         });
+
         ctx.clip();
         ctx.drawImage(tempCanvas, 0, 0);
         ctx.restore();

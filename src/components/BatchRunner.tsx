@@ -39,6 +39,7 @@ export const BatchRunner: React.FC<BatchRunnerProps> = ({ files, recipe }) => {
                 const results = await imageProcessor.process(img, recipe, {
                     originalImage: img,
                     filename: file.name,
+                    variables: new Map(),
                 });
 
                 // Add to zip

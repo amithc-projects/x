@@ -149,3 +149,126 @@ export const duotone: TransformationDefinition = {
         ctx.putImageData(imageData, 0, 0);
     }
 };
+
+export const posterize: TransformationDefinition = {
+    id: 'filter-posterize',
+    name: 'Posterize',
+    description: 'Reduce the number of colors.',
+    params: [
+        { name: 'levels', label: 'Levels', type: 'range', min: 2, max: 255, defaultValue: 8 }
+    ],
+    apply: (ctx, params) => {
+        const levels = Math.max(2, Math.min(255, params.levels || 8));
+        const step = 255 / (levels - 1);
+
+        const width = ctx.canvas.width;
+        const height = ctx.canvas.height;
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.round(data[i] / step) * step;
+            data[i + 1] = Math.round(data[i + 1] / step) * step;
+            data[i + 2] = Math.round(data[i + 2] / step) * step;
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+    }
+};
+
+export const edgeDetection: TransformationDefinition = {
+    id: 'filter-edge-detection',
+    name: 'Edge Detection',
+    description: 'Detect edges using Sobel operator.',
+    params: [
+        { name: 'threshold', label: 'Threshold', type: 'range', min: 0, max: 255, defaultValue: 50 },
+        { name: 'composite', label: 'Composite over Original', type: 'boolean', defaultValue: false },
+        { name: 'invert', label: 'Invert (Black Edges)', type: 'boolean', defaultValue: true }
+    ],
+    apply: (ctx, params) => {
+        const threshold = params.threshold || 50;
+        const composite = params.composite || false;
+        const invert = params.invert !== undefined ? params.invert : true;
+
+        const width = ctx.canvas.width;
+        const height = ctx.canvas.height;
+
+        // We need a copy of the original data for the Sobel operator
+        const originalData = ctx.getImageData(0, 0, width, height);
+        const src = originalData.data;
+
+        const outputData = ctx.createImageData(width, height);
+        const dst = outputData.data;
+
+        const w = width;
+        const h = height;
+
+        // Sobel kernels
+        const kx = [
+            [-1, 0, 1],
+            [-2, 0, 2],
+            [-1, 0, 1]
+        ];
+        const ky = [
+            [-1, -2, -1],
+            [0, 0, 0],
+            [1, 2, 1]
+        ];
+
+        const getPixel = (x: number, y: number) => {
+            if (x < 0 || x >= w || y < 0 || y >= h) return 0;
+            const i = (y * w + x) * 4;
+            // Use luminance
+            return 0.299 * src[i] + 0.587 * src[i + 1] + 0.114 * src[i + 2];
+        };
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                let gx = 0;
+                let gy = 0;
+
+                for (let ky_y = -1; ky_y <= 1; ky_y++) {
+                    for (let kx_x = -1; kx_x <= 1; kx_x++) {
+                        const val = getPixel(x + kx_x, y + ky_y);
+                        gx += val * kx[ky_y + 1][kx_x + 1];
+                        gy += val * ky[ky_y + 1][kx_x + 1];
+                    }
+                }
+
+                const magnitude = Math.sqrt(gx * gx + gy * gy);
+                const isEdge = magnitude > threshold;
+
+                const i = (y * w + x) * 4;
+
+                if (composite) {
+                    // If composite, we draw edges on top of original
+                    // If it's an edge, draw it (black or white depending on invert)
+                    // If not an edge, keep original pixel
+                    if (isEdge) {
+                        const edgeColor = invert ? 0 : 255;
+                        dst[i] = edgeColor;
+                        dst[i + 1] = edgeColor;
+                        dst[i + 2] = edgeColor;
+                        dst[i + 3] = 255;
+                    } else {
+                        dst[i] = src[i];
+                        dst[i + 1] = src[i + 1];
+                        dst[i + 2] = src[i + 2];
+                        dst[i + 3] = src[i + 3];
+                    }
+                } else {
+                    // Just the edge map
+                    let val = isEdge ? 255 : 0;
+                    if (invert) val = 255 - val; // Invert: Edges are black (0), background white (255)
+
+                    dst[i] = val;
+                    dst[i + 1] = val;
+                    dst[i + 2] = val;
+                    dst[i + 3] = 255;
+                }
+            }
+        }
+
+        ctx.putImageData(outputData, 0, 0);
+    }
+};
